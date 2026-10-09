@@ -1,0 +1,3 @@
+Risk ID,Risk Code,Risk Title,Risk Description,Risk Category,Risk Owner,Inherent Likelihood,Inherent Consequence,Residual Likelihood,Residual Consequence,Next Review Date,Risk Status
+1041,SR-12,Failure to meet regulatory reporting deadlines,"Returns lodged late because data is assembled by hand, from three systems",Compliance,Hana Ruatapu,Likely,Major,Possible,Moderate,15/11/2026,Active
+1042,SR-13,Loss of the branch network for more than a day,Power or communications outage across the branch network,Operational,Tom Lee,Unlikely,Severe,,,02/12/2026,Active

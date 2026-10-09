@@ -1,13 +1,55 @@
 [
   {
     "name": "week",
-    "title": "This week",
-    "subtitle": "Risk and Compliance for Claude Code: what needs attention, rendered by npm run view",
+    "title": "Risk week",
+    "subtitle": "Fictional demo data until you import your own register",
     "sections": [
       {
-        "title": "Needs attention",
-        "note": "TODO(author): point this at the industry's attention view (overdue, stuck, quiet).",
-        "sql": "select 'replace me' as item, 'TODO(author)' as why"
+        "title": "Breached or due now",
+        "note": "Rule findings with the rule cited. docs/compliance.md has the source for each.",
+        "sql": "select rule,reference,finding from compliance_findings where severity=1 order by rule,reference"
+      },
+      {
+        "title": "Open incidents and notice clocks",
+        "sql": "select reference,title,severity,owner,days_open,to_char(cps230_42_due_at,'YYYY-MM-DD HH24:MI') as apra_24h_due,to_char(cps230_33_due_at,'YYYY-MM-DD HH24:MI') as apra_72h_due,ndb_assess_by from incident_queue order by aware_at"
+      },
+      {
+        "title": "Overdue actions",
+        "sql": "select record,reference,title,owner,due_on,days_left from action_queue where days_left<0 order by due_on"
+      },
+      {
+        "title": "Reviews and control tests due",
+        "sql": "select 'review' as what,reference,title,owner,next_review_on as due_on from risk_register where status='open' and (next_review_on is null or next_review_on<=current_date+7) union all select 'control test',risk||'/'||reference,title,owner,next_test_on from control_queue where next_test_on<=current_date+7 order by due_on nulls first"
+      }
+    ]
+  },
+  {
+    "name": "register",
+    "title": "Risk register",
+    "subtitle": "Open risks by residual rating, against appetite",
+    "sections": [
+      {
+        "title": "Over appetite",
+        "sql": "select reference,title,owner,residual_score as residual,appetite_score as appetite,open_actions,overdue_actions from risk_register where over_appetite order by residual_score desc"
+      },
+      {
+        "title": "Every open risk",
+        "sql": "select reference,title,category,owner,inherent_score as inherent,residual_score as residual,rating,next_review_on,weak_controls,open_actions from risk_register order by residual_score desc,reference"
+      }
+    ]
+  },
+  {
+    "name": "resilience",
+    "title": "Operational resilience",
+    "subtitle": "Critical operations, tolerance levels and material service providers",
+    "sections": [
+      {
+        "title": "Critical operations",
+        "sql": "select reference,name,owner,max_outage_hours,max_data_loss_hours,last_exercise_on,bcp_reviewed_on from critical_operations order by reference"
+      },
+      {
+        "title": "Material service providers",
+        "sql": "select p.reference,p.name,p.service,o.reference as operation,p.agreement_changed_on,p.regulator_notified_on,p.last_reviewed_on from service_providers p left join critical_operations o on o.id=p.critical_operation_id where p.material and p.status='active' order by p.reference"
       }
     ]
   }

@@ -1,24 +1,23 @@
 # Why there is no front end
 
-Camms is a database with a subscription. The tables underneath it are ordinary: a few entities, a few relationships, a handful of workflows you repeat every week. What you pay for is the layer on top that lets people who do not write SQL get at those tables. Screens, filters, dashboards, forms.
+A risk system is a register, a few lists hanging off it (controls, actions, incidents, obligations) and a calendar of reviews, tests and notices. What a GRC subscription charges for is the screens over those lists: forms to fill in, a heat map, a committee pack, a dashboard of what is late.
 
-That layer used to be the whole product, because talking to a database was hard. It is not hard any more. Open this folder in Claude Code, describe what you want, and it writes the query, runs it, and explains the answer. Ask a question the dashboard never had a chart for and you still get an answer.
+Those screens were needed because the database was hard to talk to. It is not any more. Open this folder in Claude Code and ask "which risks are over appetite with nothing being done about them?" or "what notice clocks are running?" and it runs the query and answers. Ask a question nobody built a dashboard for and you still get an answer.
 
 ## What you gain
 
-- **Better answers.** A dashboard shows what the vendor decided to chart. Here you ask your own question, in your own words, and get it answered against your own data.
-- **No seats.** Everyone who needs to look can look. The bill does not grow with headcount.
-- **Your data in your Postgres.** Plain tables. Back them up, query them from anything, leave any time. There is no export step because there is nothing to leave.
-- **A process that matches you.** When your way of working changes, you add a command. You do not wait for a feature request to clear.
+- **Answers to your own questions.** The ten in the README are the start. Ask for the next one in plain words.
+- **No seats.** Every risk owner, control tester and committee member can ask. The bill does not grow with the people who need to look.
+- **Your register in a database you own.** Plain tables. Back them up, report from them, leave any time.
+- **Rules you can read.** Every compliance check is written down in `docs/compliance.md` with its source, and in one SQL view you can change.
 
 ## What you give up
 
-- **A visual board.** Stages are a table you ask about, not cards you drag.
+- **A form for every field.** Risk owners record a review by asking for it, not by filling in a screen. Some people will want a screen.
 - **A phone app.** It runs where Claude Code runs.
-- **A vendor help desk.** This is open source. Enterprise DNA supports the installed version for businesses that want someone to call.
+- **Workflow approvals with email notifications.** Approvals here are records with an actor. Nothing sends email.
+- **A vendor help desk.** This is open source. Enterprise DNA supports the installed version.
 
-## Who this fits
-
-Small teams who already use Claude Code, or who would rather learn to ask than learn another interface. If your team needs a screen to look at all day, keep Camms. If you need the answers more than the screens, this is cheaper, faster and yours.
+Enterprise DNA builds a web front end, approvals and notifications onto the same database for businesses that want them. The register underneath stays yours.
 
 Installed and run for you: https://enterprisedna.co/omni/instead-of/camms

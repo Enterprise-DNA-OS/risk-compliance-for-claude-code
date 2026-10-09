@@ -1,0 +1,12 @@
+[
+  ["Which risks sit over appetite with no treatment under way?", "appetite"],
+  ["Which incidents have an APRA notice clock running, and when does it end?", "incidents"],
+  ["Which material service provider agreements changed without a notice to APRA?", "compliance"],
+  ["Which critical operations have gone more than a year without a continuity exercise?", "resilience"],
+  ["Which risks had an incident after their last review?", "stale-ratings"],
+  ["Which controls are ineffective or never tested, and which risks rely on them?", "control-gaps"],
+  ["Which residual ratings moved since the last committee meeting, and why?", "movement"],
+  ["Which privacy breaches still need an assessment or a notice?", "compliance"],
+  ["Which compliance obligations are overdue for attestation or last recorded a breach?", "obligations-due"],
+  ["Who holds the most overdue reviews, tests and actions?", "owner-workload"]
+]

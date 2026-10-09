@@ -22,9 +22,34 @@ Fill this in once. A worker with context knows. A worker without it guesses.
 
 | When the operator asks for... | Use this |
 |---|---|
-| <!-- TODO(author): one row per slash command --> | `/...` |
+| What needs attention, what is late | `/attention` |
+| The Monday review | `/weekly-review` |
+| Are we compliant, what is breached | `/compliance` (rules and sources in `docs/compliance.md`) |
+| The register, one risk | `/risks`, `/risk` |
+| The heat map | `/heat-map` |
+| Over appetite | `/appetite` |
+| What moved since the last meeting | `/movement` |
+| Ratings set before an incident | `/stale-ratings` |
+| Weak or untested controls | `/control-gaps` |
+| Reviews, tests or actions due | `/reviews-due`, `/controls-due`, `/actions-due` |
+| An incident happened | `/log-incident`, then `/incidents` for the clocks |
+| A notice to APRA, the Privacy Commissioner or the OAIC | `/draft-notification` (draft only, a person lodges it) |
+| Something was notified, assessed or fixed | `/update-incident`, `/close-incident` |
+| Obligations and attestations | `/obligations-due`, `/attest`, `/add-obligation` |
+| CPS 230: critical operations and providers | `/resilience`, `/add-operation`, `/exercise`, `/add-provider`, `/update-provider` |
+| Add or change a risk | `/add-risk`, `/update-risk`, `/review-risk`, `/add-category` |
+| Controls and test results | `/add-control`, `/test-control` |
+| Treatment actions | `/add-action`, `/complete-action` |
+| Who is behind | `/owner-workload` |
+| The committee report | `/risk-report` |
+| History or a note | `/activity`, `/log` |
+| Who we are, which rules apply | `/settings` |
+| Bring Camms across | `/import` (read `docs/replace-camms.md` first) |
+| Back everything up | `/export` |
+| Change a field, the matrix or a rule | `/customise` |
+| A new read-only page | `/new-view` |
 
-If an ask fits nothing here, run the CLI directly (`npm run <cli> -- --help`) and then propose a new command for it.
+If an ask fits nothing here, run the CLI directly (`npm run risk -- help`) and then propose a new command for it.
 
 ## Hard rules
 
@@ -32,6 +57,9 @@ If an ask fits nothing here, run the CLI directly (`npm run <cli> -- --help`) an
 - Never delete records without an explicit yes in this session. Prefer marking closed or archived.
 - Never invent a record. If a name is ambiguous, list the candidates and ask.
 - The database is the source of truth. If the answer is not in it, say so.
+- Never record a regulator or privacy notice as made until a person says it was made. Drafts go to `drafts/`.
+- Never decide materiality, serious harm or appetite. Ask the responsible person and record their answer.
+- Times of awareness are UTC unless the operator gives an offset. Say the time back before recording it.
 
 ## Where things live
 

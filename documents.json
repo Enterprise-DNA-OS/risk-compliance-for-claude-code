@@ -1,11 +1,67 @@
 [
   {
-    "name": "example",
-    "title": "TODO(author): the first document this industry must produce",
-    "for_each": "select gen_random_uuid() as id, 'Example' as name",
+    "name": "risk-profile",
+    "title": "Risk profile",
+    "for_each": "select id,reference from risks where status<>'closed'",
+    "file": "reference",
+    "sections": [
+      {
+        "title": "Risk",
+        "sql": "select reference,title,category,owner,inherent_score as inherent,residual_score as residual,rating,appetite_score as appetite,next_review_on from risk_register where id=$1"
+      },
+      {
+        "title": "Description",
+        "sql": "select description from risks where id=$1"
+      },
+      {
+        "title": "Controls",
+        "sql": "select reference,title,owner,kind,effectiveness,last_tested_on from controls where risk_id=$1 and status='active' order by reference"
+      },
+      {
+        "title": "Treatment actions",
+        "sql": "select reference,title,owner,due_on,status from actions where risk_id=$1 order by due_on"
+      },
+      {
+        "title": "Rating history",
+        "sql": "select reviewed_on,reviewer,residual_likelihood*residual_consequence as residual,note from risk_reviews where risk_id=$1 order by reviewed_on desc"
+      }
+    ]
+  },
+  {
+    "name": "incident-report",
+    "title": "Incident report",
+    "for_each": "select id,reference from incidents",
+    "file": "reference",
+    "sections": [
+      {
+        "title": "Incident",
+        "note": "Internal record. A regulator or privacy notice is a separate step, drafted with draft-notification and sent by a person.",
+        "sql": "select reference,title,kind,severity,owner,occurred_at,aware_at,status,closed_on from incidents where id=$1"
+      },
+      {
+        "title": "What happened",
+        "sql": "select description,root_cause from incidents where id=$1"
+      },
+      {
+        "title": "Notice record",
+        "sql": "select material_impact,outside_tolerance,regulator_notified_at,privacy_breach,privacy_jurisdiction,privacy_assessed_on,privacy_notifiable,privacy_notified_on from incidents where id=$1"
+      },
+      {
+        "title": "Actions",
+        "sql": "select reference,title,owner,due_on,status,completed_on from actions where incident_id=$1 order by due_on"
+      }
+    ]
+  },
+  {
+    "name": "obligations-register",
+    "title": "Compliance obligations register",
+    "for_each": "select true as id,name from organisation",
     "file": "name",
     "sections": [
-      { "title": "Details", "sql": "select 'replace me' as item, $1::text as record_id" }
+      {
+        "title": "Obligations and attestations",
+        "sql": "select reference,title,source,owner,last_attested_on,last_outcome,next_due_on from obligation_queue where $1::boolean order by reference"
+      }
     ]
   }
 ]
