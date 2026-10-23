@@ -23,7 +23,7 @@ const actor = 'Test operator';
 try {
   db = await getDb();
   if (db.mode === 'postgres') assert.equal((await db.query("select tablename from pg_tables where schemaname='public'")).length, 0, 'TEST_DATABASE_URL must be a new, empty, disposable database');
-  assert.equal((await migrate(db)).ran.length, 1); assert.equal((await migrate(db)).ran.length, 0);
+  assert.equal((await migrate(db)).ran.length, 2); assert.equal((await migrate(db)).ran.length, 0);
   await seed(db); await seed(db);
 
   // ---- reads on the demo data
@@ -55,7 +55,7 @@ try {
   const att = await call('attention'); assert(find(att, 'R-005')); assert.equal(att[0].severity, 1);
   const work = await call('owner-workload'); assert.equal(find(work, 'Marcus', 'owner').total_overdue, 4);
   assert((await call('activity')).length >= 7); assert.equal((await call('activity', {record: 'r-003'})).length, 1);
-  const weekly = await call('weekly-review'); assert.deepEqual(Object.keys(weekly), ['compliance', 'incidents', 'actions-due', 'reviews-due', 'controls-due', 'appetite']);
+  const weekly = await call('weekly-review'); assert.deepEqual(Object.keys(weekly), ['compliance', 'incidents', 'actions-due', 'reviews-due', 'controls-due', 'appetite', 'indicator-breaches']);
   const one = await call('risk', {risk: 'core banking'}); assert.equal(one.risk.reference, 'R-001'); assert.equal(one.controls.length, 2); assert.equal(one.reviews.length, 2);
   assert.equal((await resolve(db, 'risks', 'a0000000-0000-0000-0000-000000000001')).reference, 'R-001');
   await assert.rejects(() => resolve(db, 'risks', 'a'), /Ambiguous[\s\S]*R-001[\s\S]*R-002/);
@@ -131,7 +131,7 @@ try {
   await fails('attest', {obligation: 'OB-9', outcome: 'fine', evidence: 'x', actor}, /outcome must be/);
   await call('attest', {obligation: 'OB-9', outcome: 'compliant', evidence: 'board://minutes', actor});
   assert(!find(await call('obligations-due'), 'OB-9'));
-  await call('add-operation', {reference: 'OP-9', name: 'Loan settlement', owner: 'Tom', 'max-outage-hours': '12', 'max-data-loss-hours': '1', actor});
+  await call('add-operation', {reference: 'OP-9', name: 'Loan settlement', owner: 'Tom', 'max-outage-hours': '12', 'max-data-loss-hours': '1', 'service-level': 'Settlements made the same day', actor});
   await fails('add-operation', {reference: 'OP-10', name: 'x', owner: 'Tom', 'max-outage-hours': 'soon', actor}, /number of hours/);
   assert((await call('compliance')).some(r => r.reference === 'OP-9' && r.rule === 'CPS230-43'));
   await call('exercise', {operation: 'OP-9', kind: 'exercise', actor}); await call('exercise', {operation: 'loan settlement', kind: 'bcp-review', actor});
@@ -149,7 +149,59 @@ try {
   await fails('log', {record: 'NOPE-1', note: 'x', actor}, /No record/);
   await fails('add-control', {risk: 'R-001', reference: 'C-5', title: 'x', owner: 'Lee'}, /--actor is required/);
 
+  // key risk indicators: thresholds both ways, readings, red and late rules
+  await fails('add-indicator', {reference: 'KRI-1', name: 'Failed logins', owner: 'Marcus', amber: '10', red: '5', actor}, /--red must be at or above --amber/);
+  await fails('add-indicator', {reference: 'KRI-1', name: 'Uptime', owner: 'Priya', amber: '99', red: '99.5', direction: 'lower', actor}, /--red must be at or below --amber/);
+  await fails('add-indicator', {reference: 'KRI-1', name: 'x', owner: 'Priya', amber: 'high', red: '2', actor}, /--amber must be a number/);
+  await call('add-indicator', {reference: 'KRI-1', name: 'Phishing click rate', owner: 'Marcus', amber: '5', red: '10', unit: '%', risk: 'R-002', actor});
+  await call('add-indicator', {reference: 'KRI-2', name: 'Card authorisation uptime', owner: 'Priya', amber: '99.5', red: '99', direction: 'lower', unit: '%', operation: 'OP-1', every: '7', actor});
+  assert.equal(find(await call('indicators'), 'KRI-1').status, 'no reading');
+  assert((await call('compliance')).some(r => r.reference === 'KRI-1' && r.rule === 'POLICY-KRI-LATE'), 'never measured is late');
+  assert(find(await call('attention'), 'KRI-2'));
+  await call('record-reading', {indicator: 'KRI-1', value: '4.2', date: day(-40), actor});
+  assert.equal((await call('record-reading', {indicator: 'phishing', value: '11.5', actor})).status, 'red');
+  await fails('record-reading', {indicator: 'KRI-1', value: '3', actor}, /already has a reading/);
+  await fails('record-reading', {indicator: 'KRI-1', value: '3', date: day(2), actor}, /future/);
+  assert.equal((await call('record-reading', {indicator: 'KRI-2', value: '99.2', actor})).status, 'amber');
+  const kris = await call('indicators'); assert.equal(kris[0].reference, 'KRI-1'); assert.equal(kris[0].trend, 'worse'); assert.equal(find(kris, 'KRI-2').status, 'amber');
+  assert.equal((await call('indicators', {status: 'red'})).length, 1);
+  assert.deepEqual((await call('indicator-breaches')).map(r => r.status), ['red', 'amber']);
+  assert.equal((await call('indicator-breaches', {since: day(-60)})).length, 2, 'the green reading 40 days ago is not a breach');
+  const redRule = (await call('compliance')).find(r => r.reference === 'KRI-1' && r.rule === 'POLICY-KRI-RED'); assert.equal(redRule.severity, 1); assert.match(redRule.finding, /11.5 %.*red threshold of 10/);
+  assert(!(await call('compliance')).some(r => r.rule === 'POLICY-KRI-LATE'));
+  assert.equal((await call('risk', {risk: 'R-002'})).indicators[0].status, 'red');
+
+  // internal audit findings
+  await fails('add-finding', {reference: 'AF-1', audit: 'Payments review', title: 'x', rating: 'severe', owner: 'Marcus', due: day(10), actor}, /--rating must be/);
+  await fails('add-finding', {reference: 'AF-1', audit: 'Payments review', title: 'x', rating: 'high', owner: 'Marcus', due: day(10), control: 'C-1', actor}, /--control needs --risk/);
+  await fails('add-finding', {reference: 'AF-1', audit: 'Payments review', title: 'x', rating: 'high', owner: 'Marcus', raised: day(-5), due: day(-10), actor}, /cannot be before/);
+  await call('add-finding', {reference: 'AF-1', audit: 'Payments review', title: 'Call-back not evidenced', rating: 'high', owner: 'Marcus', raised: day(-40), due: day(-3), risk: 'R-007', control: 'C-1', actor});
+  assert.equal(find(await call('audit-findings'), 'AF-1').days_left, -3);
+  assert.equal((await call('compliance')).find(r => r.reference === 'AF-1' && r.rule === 'POLICY-AUDIT').severity, 1, 'an overdue high finding needs action now');
+  assert.equal(find(await call('owner-workload'), 'Marcus', 'owner').audit_findings, 1);
+  assert.equal((await call('risk', {risk: 'R-007'})).audit_findings.length, 1);
+  await fails('close-finding', {finding: 'AF-1', actor}, /--evidence is required/);
+  await call('close-finding', {finding: 'call-back', evidence: 'audit://2026/payments-retest', actor});
+  await fails('close-finding', {finding: 'AF-1', evidence: 'again', actor}, /already closed/);
+  assert.equal((await call('audit-findings')).length, 0); assert.equal((await call('audit-findings', {all: true}))[0].status, 'closed');
+  assert(!(await call('compliance')).some(r => r.rule === 'POLICY-AUDIT'));
+
+  // the CPS 230 pack
+  const gaps = await call('cps230-gaps');
+  assert.match(gaps.summary, /critical operations/); assert.equal(gaps.operations.length, 4);
+  assert.match(find(gaps.operations, 'OP-2').gaps, /tolerance levels incomplete/); assert.equal(find(gaps.operations, 'OP-9').gaps, 'none');
+  assert.match(find(gaps.providers, 'SP-1').gaps, /APRA not yet notified/); assert.equal(find(gaps.providers, 'SP-9').gaps, 'none');
+  assert(gaps.findings.every(f => f.rule.startsWith('CPS230') || f.rule === 'POLICY-PROVIDER-REVIEW'));
+  await call('update-provider', {provider: 'SP-2', reviewed: day(-400), actor});
+  assert((await call('compliance')).some(r => r.reference === 'SP-2' && r.rule === 'POLICY-PROVIDER-REVIEW'));
+  assert.match(find((await call('cps230-gaps')).providers, 'SP-2').gaps, /review over a year old/);
+  await call('update-provider', {provider: 'SP-2', reviewed: day(0), actor});
+
   // drafts
+  const board = await call('board-report'); const page = fs.readFileSync(board.file, 'utf8');
+  assert(board.file.endsWith('.html')); assert(page.includes('Quarterly board risk report')); assert(page.includes('Tasman Community Mutual'));
+  assert(page.includes('KRI-1')); assert(page.includes('For the board to decide')); assert(!page.includes('undefined')); assert(!page.includes('NaN'));
+  await fails('board-report', {since: day(5)}, /future/);
   const report = await call('risk-report'); const text = fs.readFileSync(report.file, 'utf8');
   assert(text.includes('DRAFT for the committee chair')); assert(text.includes('Tasman Community Mutual')); assert(text.includes('R-002'));
   for (const to of ['apra', 'opc', 'oaic']) { const d = await call('draft-notification', {incident: 'INC-1', to}); assert(fs.readFileSync(d.file, 'utf8').includes('Nothing has been sent')); }
@@ -171,16 +223,42 @@ try {
   fs.writeFileSync(mapped, 'Key,Name,Group,L,C\nM-1,Mapped risk,Financial,3 - Possible,4 - Major\n'); fs.writeFileSync(map, JSON.stringify({source_id: 'Key', title: 'Name', category: 'Group', inherent_likelihood: 'L', inherent_consequence: 'C'}));
   assert.equal((await call('import', {...imp, file: mapped, map}, ['camms'])).added, 1); assert.equal((await resolve(db, 'risks', 'CAMMS-M-1')).inherent_consequence, 4);
   fs.writeFileSync(map, JSON.stringify({source_id: 'Missing'})); await fails('import', {...imp, file: mapped, map}, /Mapped column missing/, ['camms']);
-  await fails('import', imp, /Supported import: camms/, ['riskonnect']);
+  await fails('import', imp, /Supported imports: camms, protecht-risks, protecht-incidents/, ['riskonnect']);
+
+  // ---- import from Protecht-style register exports
+  const pr = {file: path.join(dir, 'protecht-risks.csv'), actor: 'Migration operator'};
+  fs.writeFileSync(pr.file, 'Risk ID,Risk Title,Risk Category,Risk Owner,Inherent Likelihood,Inherent Impact,Residual Likelihood,Residual Impact,Next Review Date\nRSK-77,Branch robbery,Operational,Tom,Unlikely,Major,Rare,Major,01/12/2026\nRSK-78,Card skimming,Operational,Priya,3,3,,,\n');
+  assert.equal((await call('import', {...pr, 'dry-run': true}, ['protecht-risks'])).added, 2);
+  const prisks = await call('import', pr, ['protecht-risks']); assert.equal(prisks.added, 2); assert.equal(prisks.residual_defaulted_to_inherent, 1);
+  const rsk = await resolve(db, 'risks', 'RSK-77'); assert.equal(rsk.status, 'draft'); assert.equal(rsk.residual_likelihood * rsk.residual_consequence, 4); assert.equal(rsk.next_review_on, '2026-12-01');
+  assert.equal((await call('activity', {record: 'RSK-77'}))[0].note, 'Protecht export imported as a draft; original fields kept');
+  const pi = {file: path.join(dir, 'protecht-incidents.csv'), actor: 'Migration operator'};
+  fs.writeFileSync(pi.file, 'Incident ID,Incident Title,Event Type,Severity,Date Occurred,Date Identified,Linked Risk,Status,Date Closed,Root Cause\nINC-5001,ATM cash-out attack,Incident,High,03/09/2026 22:10,04/09/2026 08:30,RSK-77,Closed,20/09/2026,Skimmer on the card slot\nINC-5002,Wrong branch keys issued,Near Miss,Low,,01/10/2026,,Open,,\n');
+  await fails('import', {...pi, offset: 'AEST'}, /--offset must look like/, ['protecht-incidents']);
+  await fails('import', {...pr, offset: '+10:00'}, /--offset applies to incident imports/, ['protecht-risks']);
+  assert.equal((await call('import', {...pi, offset: '+10:00', 'dry-run': true}, ['protecht-incidents'])).added, 2);
+  await assert.rejects(() => resolve(db, 'incidents', 'INC-5001'), /No matching/, 'dry run leaves nothing behind');
+  const pinc = await call('import', {...pi, offset: '+10:00'}, ['protecht-incidents']); assert.equal(pinc.added, 2); assert.equal(pinc.closed, 1); assert.equal(pinc.linked_to_a_risk, 1); assert.equal(pinc.times_read_as, 'UTC+10:00');
+  const atm = await resolve(db, 'incidents', 'INC-5001');
+  assert.equal(atm.aware_at instanceof Date ? atm.aware_at.toISOString() : new Date(atm.aware_at).toISOString(), '2026-09-03T22:30:00.000Z'); assert.equal(atm.severity, 'major'); assert.equal(atm.status, 'closed'); assert.equal(atm.risk_id, rsk.id);
+  assert.equal((await resolve(db, 'incidents', 'INC-5002')).kind, 'near-miss');
+  assert.equal((await call('import', {...pi, offset: '+10:00'}, ['protecht-incidents'])).unchanged, 2);
+  fs.writeFileSync(changed, fs.readFileSync(pi.file, 'utf8').replace('Wrong branch keys', 'Spare branch keys')); await fails('import', {...pi, file: changed, offset: '+10:00'}, /INC-5002 changed since the last import/, ['protecht-incidents']);
+  const badRisk = path.join(dir, 'bad-risk.csv'); fs.writeFileSync(badRisk, 'Incident ID,Incident Title,Date Identified,Linked Risk\nINC-6001,Fine,01/10/2026,\nINC-6002,Orphan,01/10/2026,RSK-404\n');
+  await fails('import', {...pi, file: badRisk}, /Row 3: linked risk RSK-404 is not in the register/, ['protecht-incidents']); await assert.rejects(() => resolve(db, 'incidents', 'INC-6001'), /No matching/);
+  fs.writeFileSync(badRisk, 'Incident ID,Incident Title,Date Identified,Severity\nINC-6003,Odd,01/10/2026,Purple\n'); await fails('import', {...pi, file: badRisk}, /not a known severity/, ['protecht-incidents']);
+  fs.writeFileSync(badRisk, 'Incident ID,Incident Title,Date Identified\nINC-6005,ISO time,2026-10-01T09:15\n'); await call('import', {...pi, file: badRisk, offset: '+11:00'}, ['protecht-incidents']);
+  assert.equal(new Date((await resolve(db, 'incidents', 'INC-6005')).aware_at).toISOString(), '2026-09-30T22:15:00.000Z');
+  fs.writeFileSync(badRisk, 'Incident ID,Incident Title,Date Identified,Status\nINC-6004,Closed without a date,01/10/2026,Closed\n'); await fails('import', {...pi, file: badRisk}, /needs its date closed/, ['protecht-incidents']);
 
   const exp = await call('export'); const backup = JSON.parse(fs.readFileSync(exp.file, 'utf8'));
-  assert.equal(backup.records.risks.length, 11); assert.equal(Object.keys(backup.records).length, 16); assert(backup.records.activity.length > 40);
+  assert.equal(backup.records.risks.length, 13); assert.equal(Object.keys(backup.records).length, 19); assert.equal(backup.records.key_risk_indicators.length, 2); assert.equal(backup.records.audit_findings.length, 1); assert(backup.records.activity.length > 40);
   assert(human(await call('risks')).includes('SR-12'));
   assert.equal(Object.keys(commands).filter(c => !visited.has(c)).length, 0, `Uncovered commands: ${Object.keys(commands).filter(c => !visited.has(c))}`);
   await db.close(); db = null;
 
   // ---- the CLI as a person runs it, and the rendered pages
-  assert.equal(JSON.parse(shell('risk.mjs', ['risks', '--json'])).length, 10);
+  assert.equal(JSON.parse(shell('risk.mjs', ['risks', '--json'])).length, 12);
   const amb = spawnSync(process.execPath, [path.join(REPO_ROOT, 'scripts/risk.mjs'), 'risk', '--risk=a', '--json'], {cwd: REPO_ROOT, env: process.env, encoding: 'utf8'});
   assert.equal(amb.status, 1); assert.match(amb.stderr, /R-001[\s\S]*R-002/); assert.equal(amb.stdout, '');
   shell('view.mjs'); shell('docs.mjs');

@@ -36,15 +36,19 @@ Fill this in once. A worker with context knows. A worker without it guesses.
 | A notice to APRA, the Privacy Commissioner or the OAIC | `/draft-notification` (draft only, a person lodges it) |
 | Something was notified, assessed or fixed | `/update-incident`, `/close-incident` |
 | Obligations and attestations | `/obligations-due`, `/attest`, `/add-obligation` |
+| CPS 230: where are the gaps | `/cps230-gaps` |
 | CPS 230: critical operations and providers | `/resilience`, `/add-operation`, `/exercise`, `/add-provider`, `/update-provider` |
 | Add or change a risk | `/add-risk`, `/update-risk`, `/review-risk`, `/add-category` |
 | Controls and test results | `/add-control`, `/test-control` |
 | Treatment actions | `/add-action`, `/complete-action` |
 | Who is behind | `/owner-workload` |
 | The committee report | `/risk-report` |
+| The quarterly board report | `/board-report` |
+| Key risk indicators, what breached this month | `/indicators`, `/indicator-breaches`, `/add-indicator`, `/record-reading` |
+| Internal audit findings | `/audit-findings`, `/add-finding`, `/close-finding` |
 | History or a note | `/activity`, `/log` |
 | Who we are, which rules apply | `/settings` |
-| Bring Camms across | `/import` (read `docs/replace-camms.md` first) |
+| Bring Camms or Protecht across | `/import` (read `docs/replace-camms.md` or `docs/replace-protecht.md` first) |
 | Back everything up | `/export` |
 | Change a field, the matrix or a rule | `/customise` |
 | A new read-only page | `/new-view` |

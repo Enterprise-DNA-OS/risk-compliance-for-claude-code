@@ -8,7 +8,7 @@ The CPS 230 rules apply only when `settings --apra-regulated=true`. The ASX rule
 |---|---|---|
 | CPS230-33 | An incident marked as likely to have a material financial impact, or a material impact on critical operations, has no APRA notice recorded. Due 72 hours after the business became aware. | [APRA CPS 230](https://www.apra.gov.au/sites/default/files/2023-07/Prudential%20Standard%20CPS%20230%20Operational%20Risk%20Management%20-%20clean.pdf) para 33 |
 | CPS230-42 | A disruption to a critical operation outside tolerance has no APRA notice recorded. Due 24 hours after awareness. | CPS 230 para 42 |
-| CPS230-38 | A critical operation has no maximum outage or maximum data loss tolerance. | CPS 230 para 38 |
+| CPS230-38 | A critical operation is missing a tolerance level: maximum outage, maximum data loss, or the minimum service level kept during a disruption. | CPS 230 para 38(a), (b) and (c) |
 | CPS230-43 | A critical operation has no business continuity exercise in the last 365 days. | CPS 230 para 43 (an annual business continuity exercise) |
 | CPS230-45 | A critical operation's BCP has no recorded review in the last 365 days. | CPS 230 para 45 (update, as necessary, on an annual basis) |
 | CPS230-59 | A provider supporting a critical operation had its agreement entered or materially changed, and APRA has no notice recorded since. Due 20 business days after the change. | CPS 230 para 59(a) |
@@ -31,6 +31,10 @@ These are local rules, not law. Change them with `/customise`.
 | POLICY-IMPORT | An imported risk is still a draft: confirm its ratings and owner, then open it with `review-risk` or `update-risk --status=open`. |
 | POLICY-ATTEST | A compliance obligation is past its attestation date or has never been attested. |
 | POLICY-BREACH | The latest attestation on an obligation recorded a breach. |
+| POLICY-KRI-RED | A key risk indicator's latest reading is at or past its red threshold. Severity 1: escalate to the owner. |
+| POLICY-KRI-LATE | A key risk indicator has no reading, or its latest reading is older than its measurement cycle. |
+| POLICY-AUDIT | An internal audit finding is open past its due date. Severity 1 when the finding is rated high. |
+| POLICY-PROVIDER-REVIEW | A material service provider has no assurance review in the last 365 days. CPS 230 expects material arrangements to be monitored; the annual cycle is a house choice. |
 
 ## How the clocks count
 

@@ -4,13 +4,21 @@ import { readFileSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT } from './db.mjs';
 
+// BRAND_FILE points at another brand file (the insurer demo uses demo/insurer/brand.json).
 export function loadBrand() {
-  const file = path.join(REPO_ROOT, 'brand.json');
+  const file = path.resolve(REPO_ROOT, process.env.BRAND_FILE || 'brand.json');
   const brand = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};
-  return {
+  const out = {
     business_name: 'Your Business', primary: '#6654f5', accent: '#ca5a8b', ink: '#0b0c18', paper: '#ffffff',
     logo_path: '', footer_line: '', ...brand,
   };
+  // A local logo file is embedded, so the page still shows it when opened from drafts/ or attached to an email.
+  if (out.logo_path && !/^(https?:|data:)/.test(out.logo_path)) {
+    const logo = path.resolve(path.dirname(file), out.logo_path);
+    const type = { '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' }[path.extname(logo).toLowerCase()];
+    out.logo_path = existsSync(logo) && type ? `data:${type};base64,${readFileSync(logo).toString('base64')}` : '';
+  }
+  return out;
 }
 
 export function esc(v) {
@@ -34,7 +42,7 @@ function fmt(v, key, row) {
   return v;
 }
 
-export function page({ title, subtitle = '', sections = [], brand = loadBrand() }) {
+export function page({ title, subtitle = '', sections = [], brand = loadBrand(), css = '', intro = '' }) {
   const logo = brand.logo_path ? `<img src="${esc(brand.logo_path)}" alt="" class="logo">` : '';
   const blocks = sections.map((s) => `<section><h2>${esc(s.title)}</h2>${s.note ? `<p class="note">${esc(s.note)}</p>` : ''}${s.html}</section>`).join('\n');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -54,9 +62,10 @@ td{padding:8px 10px;border-bottom:1px solid #f0f0f4;vertical-align:top}tr:hover 
 footer{text-align:center;color:#888;font-size:12px;padding:20px}
 @media(max-width:600px){header{flex-wrap:wrap;padding:18px}header .biz{margin-left:0}main{padding:16px 10px}section{padding:14px}th,td{padding:7px}}
 @media print{.table-scroll{overflow:visible}table{font-size:10px}th,td{padding:4px;white-space:normal;overflow-wrap:anywhere}body{background:#fff}section{box-shadow:none;border:1px solid #eee;break-inside:avoid}}
+${css}
 </style></head><body>
 <header>${logo}<div><h1>${esc(title)}</h1><div class="sub">${esc(subtitle)}</div></div><div class="biz">${esc(brand.business_name)}</div></header>
-<main>${blocks}</main>
+<main>${intro}${blocks}</main>
 <footer>${esc(brand.footer_line)} Generated ${new Date().toISOString().slice(0, 16).replace('T', ' ')}</footer>
 </body></html>`;
 }

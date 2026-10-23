@@ -13,9 +13,10 @@
     "migrate": "node scripts/migrate.mjs",
     "seed": "node scripts/seed.mjs",
     "demo": "node scripts/migrate.mjs && node scripts/seed.mjs && node scripts/risk.mjs attention && node scripts/risk.mjs incidents && node scripts/risk.mjs compliance",
+    "demo:insurer": "node scripts/demo-insurer.mjs",
     "view": "node scripts/view.mjs",
     "docs": "node scripts/docs.mjs",
-    "test": "node scripts/smoke.mjs",
+    "test": "node scripts/smoke.mjs && node scripts/demo-check.mjs",
     "risk": "node scripts/risk.mjs"
   },
   "dependencies": {
