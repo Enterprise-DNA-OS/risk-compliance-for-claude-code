@@ -39,7 +39,7 @@ function heatMap(d) {
       const b = bandFor(l.level * c.level, d.bands);
       const tip = `${l.label} x ${c.label}: score ${l.level * c.level}, ${b ? b.rating : ''}${hit ? `. ${hit.refs}` : '. No open risks'}`;
       cells += `<div class="hm-cell${hit ? '' : ' hm-empty'}" style="--s:${STATUS[b?.role || 'good']}" title="${esc(tip)}">
-        ${hit ? `<b>${hit.n}</b><small>${esc(hit.refs)}</small>` : ''}<span class="hm-band">${esc(b?.rating || '')}</span></div>`;
+        ${hit ? `<b>${hit.n}</b>${hit.n <= 3 ? `<small>${hit.refs.split(' ').map((r) => `<span>${esc(r)}</span>`).join(' ')}</small>` : '<small>risks</small>'}` : ''}<span class="hm-band">${esc(b?.rating || '')}</span></div>`;
     }
   }
   cells += `<div></div>${cs.map((c) => `<div class="hm-axis hm-col">${esc(c.level)} ${esc(c.label)}</div>`).join('')}`;
@@ -147,10 +147,10 @@ h3{font:600 14px/1.3 Poppins,system-ui,sans-serif;margin:0 0 8px;color:var(--ink
 .split{display:grid;grid-template-columns:minmax(300px,1fr) minmax(320px,1.2fr);gap:24px;align-items:start}
 .hm-wrap{display:flex;align-items:center;gap:6px}.hm-ytitle{writing-mode:vertical-rl;transform:rotate(180deg);color:#666;font-size:12px;font-weight:600}
 .hm{display:grid;grid-template-columns:86px repeat(5,minmax(44px,1fr));gap:2px;flex:1}
-.hm-cell{position:relative;min-height:56px;border-radius:4px;background:color-mix(in srgb,var(--s) 30%,#fff);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4px 2px;text-align:center}
-.hm-empty{background:color-mix(in srgb,var(--s) 12%,#fff)}.hm-cell b{font-size:18px;line-height:1}.hm-cell small{font-size:10px;color:#333;line-height:1.2;margin-top:2px;overflow-wrap:anywhere}
+.hm-cell{position:relative;min-height:62px;border-radius:4px;background:color-mix(in srgb,var(--s) 30%,#fff);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:15px 3px 5px;text-align:center}
+.hm-empty{background:color-mix(in srgb,var(--s) 12%,#fff)}.hm-cell b{font-size:18px;line-height:1}.hm-cell small{font-size:10px;color:#333;line-height:1.3;margin-top:3px}.hm-cell small span{white-space:nowrap}
 .hm-band{position:absolute;top:2px;right:4px;font-size:8px;color:#555;text-transform:uppercase;letter-spacing:.04em}
-.hm-axis{font-size:11px;color:#555;display:flex;align-items:center}.hm-row{justify-content:flex-end;padding-right:6px;text-align:right}.hm-col{justify-content:center;text-align:center;padding-top:4px}
+.hm-axis{font-size:11px;color:#555;display:flex;align-items:center;line-height:1.25}.hm-row{justify-content:flex-end;padding-right:6px;text-align:right}.hm-col{justify-content:center;align-items:flex-start;text-align:center;padding-top:4px;font-size:10px;hyphens:auto}
 .hm-xtitle{text-align:center;color:#666;font-size:12px;font-weight:600;margin:2px 0 8px 98px}
 .legend{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:#444;margin-left:20px}.lg{display:inline-flex;align-items:center;gap:5px}.lg i{width:12px;height:12px;border-radius:3px;background:color-mix(in srgb,var(--s) 30%,#fff);border:2px solid var(--s)}
 .pill{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;font-size:13px;font-weight:600}.pill i{font-style:normal;color:var(--s,#888);font-size:12px}

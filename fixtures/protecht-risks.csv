@@ -1,0 +1,7 @@
+Risk ID,Risk Title,Risk Description,Risk Category,Business Unit,Risk Owner,Inherent Likelihood,Inherent Impact,Residual Likelihood,Residual Impact,Control Effectiveness,Risk Status,Next Review Date
+RSK-1001,Travel claims spike from a pandemic or border closure,"A border closure or outbreak triggers cancellation claims across the travel book at once",Insurance,Travel,James Kovac,Possible,Major,Unlikely,Major,Partially Effective,Active,15/12/2026
+RSK-1002,Marine cargo accumulation at a single port,Cargo values insured at one port exceed the marine event limit,Insurance,Marine,James Kovac,Unlikely,Severe,Unlikely,Major,Effective,Active,30/11/2026
+RSK-1003,Travel assistance provider cannot repatriate customers,"The emergency assistance provider cannot arrange medical evacuation or repatriation",Third party,Travel,Sarah Whitfield,Possible,Major,Unlikely,Moderate,Partially Effective,Active,20/01/2027
+RSK-1004,Sanctions breach on a marine cargo claim,A cargo claim is paid where the vessel or consignee is sanctioned,Regulatory,Marine,Priyanka Desai,Unlikely,Major,Rare,Major,Effective,Active,15/12/2026
+RSK-1005,Travel policy wording unclear on pre-existing conditions,Customers are declined under a pre-existing condition clause they could not understand,Conduct,Travel,Grace Liu,Possible,Moderate,Unlikely,Moderate,Partially Effective,Active,31/01/2027
+RSK-1006,Marine surveyor fraud,A surveyor inflates or invents damage on marine claims,Claims,Marine,Megan O'Rourke,Unlikely,Moderate,,,Not Assessed,Active,28/02/2027

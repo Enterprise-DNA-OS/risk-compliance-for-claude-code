@@ -482,7 +482,10 @@ export async function run(db, argv) {
             case when o.id is not null and p.agreement_changed_on is not null and (p.regulator_notified_on is null or p.regulator_notified_on<p.agreement_changed_on) then 'APRA not yet notified of the agreement change' end,
             case when p.last_reviewed_on is null then 'never reviewed' when p.last_reviewed_on<current_date-365 then 'review over a year old' end),''),'none') as gaps
         from service_providers p left join critical_operations o on o.id=p.critical_operation_id where p.material and p.status='active' order by p.reference`);
-      const findings = await db.query("select severity,reference,rule,finding from compliance_findings where rule like 'CPS230-%' or rule='POLICY-PROVIDER-REVIEW' order by severity,rule,reference");
+      // Para 30 control tests are one line here; controls-due lists them.
+      const all = await db.query("select severity,reference,rule,finding from compliance_findings where rule like 'CPS230-%' or rule='POLICY-PROVIDER-REVIEW' order by severity,rule,reference");
+      const tests = all.filter(f => f.rule === 'CPS230-30'), findings = all.filter(f => f.rule !== 'CPS230-30');
+      if (tests.length) findings.push({severity: 2, reference: `${tests.length} controls`, rule: 'CPS230-30', finding: `${tests.filter(f => f.finding === 'Never tested').length} never tested, ${tests.filter(f => f.finding !== 'Never tested').length} overdue: see controls-due`});
       const gapOps = operations.filter(x => x.gaps !== 'none').length, gapProviders = providers.filter(x => x.gaps !== 'none').length;
       return {summary: org.apra_regulated ? `${gapOps} of ${operations.length} critical operations and ${gapProviders} of ${providers.length} material providers have a gap; ${findings.filter(f => f.severity === 1).length} findings need action now`
         : 'Not APRA-regulated (settings --apra-regulated=false): CPS 230 rules are off, the records below are for information', operations, providers, findings};
@@ -720,7 +723,8 @@ export function human(result) {
     const cols = Object.keys(result[0]).filter(k => !HIDE.includes(k));
     return table(result, cols.map(key => ({key, label: key, width: 48, format: v => v instanceof Date ? v.toISOString().slice(0, 16).replace('T', ' ') : v && typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')})));
   }
-  if (result && typeof result === 'object') return Object.entries(result).map(([k, v]) => v && typeof v === 'object' && !(v instanceof Date) ? `${k}\n${human(Array.isArray(v) ? v : [v])}` : `${k}: ${v ?? ''}`).join('\n\n');
+  if (result && typeof result === 'object') return Object.entries(result).filter(([k, v]) => !HIDE.includes(k) && v !== null && v !== '')
+    .map(([k, v]) => v instanceof Date ? `${k}: ${v.toISOString().slice(0, 16).replace('T', ' ')} UTC` : v && typeof v === 'object' ? `${k}\n${human(Array.isArray(v) ? v : [v])}` : `${k}: ${v}`).join('\n');
   return String(result);
 }
 

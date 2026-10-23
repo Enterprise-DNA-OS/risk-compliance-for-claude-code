@@ -1,0 +1,10 @@
+{
+  "_": "The demo insurer's brand. Fictional. Used when BRAND_FILE=demo/insurer/brand.json.",
+  "business_name": "Tallowood General Insurance Ltd",
+  "logo_path": "logo.svg",
+  "primary": "#1f6b52",
+  "accent": "#d9a441",
+  "ink": "#10241d",
+  "paper": "#ffffff",
+  "footer_line": "Tallowood General Insurance Ltd is a fictional insurer. Demo data only."
+}
