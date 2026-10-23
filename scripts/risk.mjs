@@ -8,6 +8,7 @@ import {pathToFileURL} from 'node:url';
 import {getDb, REPO_ROOT} from './lib/db.mjs';
 import {parseCsv, pick} from './lib/csv.mjs';
 import {table} from './lib/format.mjs';
+import {boardReportHtml} from './lib/board-report.mjs';
 
 export const commands = {
   help: 'Show commands',
@@ -49,8 +50,17 @@ export const commands = {
   exercise: '--operation --kind=exercise|bcp-review --actor; optional --date',
   'add-provider': '--reference --name --service --owner --actor; optional --material --operation --agreement-changed',
   'update-provider': '--provider --actor with changed fields: --material --operation --agreement-changed --regulator-notified --reviewed --status',
+  'cps230-gaps': 'CPS 230 gaps: every critical operation and material provider checked for tolerance levels, exercises, BCP reviews, APRA notices and provider reviews',
+  indicators: 'Key risk indicators with the latest reading, red, amber or green: optional --status',
+  'indicator-breaches': 'Indicator readings at amber or red: --since=YYYY-MM-DD (default the first of this month)',
+  'add-indicator': '--reference --name --owner --amber --red --actor; optional --risk --operation --unit --direction=higher|lower --every --description',
+  'record-reading': '--indicator --value --actor; optional --date --note',
+  'audit-findings': 'Open internal audit findings, overdue first: optional --all',
+  'add-finding': '--reference --audit --title --rating=low|medium|high --owner --due --actor; optional --risk --control --raised --description',
+  'close-finding': '--finding --evidence --actor; optional --date',
+  'board-report': 'Write the quarterly board risk report as a branded HTML page in drafts/: optional --since',
   log: '--record --note --actor',
-  import: 'camms --file=export.csv --actor; optional --map=columns.json --dry-run',
+  import: 'camms|protecht-risks|protecht-incidents --file=export.csv --actor; optional --map=columns.json --offset=+10:00 --dry-run',
   export: 'Write every record to a JSON backup in exports/',
 };
 
@@ -79,6 +89,7 @@ const bool = (v, label) => {
 };
 const intIn = (v, lo, hi, label) => { const s = String(v ?? ''); if (!/^\d+$/.test(s) || Number(s) < lo || Number(s) > hi) throw Error(`--${label} must be a whole number from ${lo} to ${hi}`); return Number(s); };
 const hoursValue = (v, label) => { const s = String(v ?? ''); if (!/^\d{1,5}(\.\d{1,2})?$/.test(s)) throw Error(`--${label} must be a number of hours`); return s; };
+const numberValue = (v, label) => { const s = String(v ?? '').trim(); if (!/^-?\d{1,12}(\.\d{1,6})?$/.test(s)) throw Error(`--${label} must be a number`); return s; };
 const days = (o, dflt) => intIn(o.days ?? String(dflt), 0, 3660, 'days');
 const oneOf = (v, choices, label) => { if (!choices.includes(v)) throw Error(`--${label} must be ${choices.join('|')}`); return v; };
 function args(argv) {
@@ -115,6 +126,8 @@ const KINDS = {
   obligations: {label: 'title', audit: 'obligation'},
   critical_operations: {label: 'name', audit: 'operation'},
   service_providers: {label: 'name', audit: 'provider'},
+  key_risk_indicators: {label: 'name', audit: 'indicator'},
+  audit_findings: {label: 'title', audit: 'audit'},
 };
 // Exact id or reference first, then a unique partial id or name match. Ambiguous lists and fails.
 export async function resolve(db, kind, search, parent = null) {
@@ -133,9 +146,9 @@ async function transaction(db, fn, dry = false) { await db.exec('begin'); try { 
 async function insert(db, t, data) { const k = Object.keys(data); return (await db.query(`insert into ${t}(${k.join(',')}) values(${k.map((_, i) => `$${i + 1}`).join(',')}) returning *`, Object.values(data)))[0]; }
 async function update(db, t, id, data) { const k = Object.keys(data); if (!k.length) throw Error('No changed fields supplied'); return (await db.query(`update ${t} set ${k.map((c, i) => `${c}=$${i + 1}`).join(',')} where id=$${k.length + 1} returning *`, [...Object.values(data), id]))[0]; }
 async function category(db, name) { const r = await db.query('select name from risk_categories where lower(name)=lower($1)', [name]); if (!r.length) { const all = await db.query('select name from risk_categories order by name'); throw Error(`Unknown category "${name}". Known: ${all.map(x => x.name).join(', ')}. Add one with add-category.`); } return r[0].name; }
-function writeDraft(prefix, text) { const dir = path.resolve(process.env.OUTPUT_DIR || REPO_ROOT, 'drafts'); fs.mkdirSync(dir, {recursive: true}); const file = path.join(dir, `${prefix}-${today()}-${randomUUID().slice(0, 8)}.md`); fs.writeFileSync(file, text, {flag: 'wx'}); return file; }
+function writeDraft(prefix, text, ext = 'md') { const dir = path.resolve(process.env.OUTPUT_DIR || REPO_ROOT, 'drafts'); fs.mkdirSync(dir, {recursive: true}); const file = path.join(dir, `${prefix}-${today()}-${randomUUID().slice(0, 8)}.${ext}`); fs.writeFileSync(file, text, {flag: 'wx'}); return file; }
 
-// ------------------------------------------------------------------ import (Camms risk register export)
+// ------------------------------------------------------------------ import (Camms and Protecht register exports)
 
 export const importFields = {
   source_id: ['Risk ID', 'Risk Id', 'ID'], reference: ['Risk Code', 'Risk Reference', 'Risk Number', 'Risk ID'], title: ['Risk Title', 'Risk Name', 'Title', 'Risk'],
@@ -144,24 +157,58 @@ export const importFields = {
   residual_likelihood: ['Residual Likelihood', 'Current Likelihood'], residual_consequence: ['Residual Consequence', 'Current Consequence'],
   next_review: ['Next Review Date', 'Review Date'],
 };
+// Protecht ERM register exports. Column headings follow the register's configuration, so these are the
+// common ones; --map covers the rest. Protecht calls consequence "impact".
+export const protechtRiskFields = {
+  source_id: ['Risk ID', 'Risk Id', 'ID'], reference: ['Risk Reference', 'Risk Code', 'Risk Number', 'Risk ID'], title: ['Risk Title', 'Risk Name', 'Title', 'Name'],
+  description: ['Risk Description', 'Description'], category: ['Risk Category', 'Category', 'Risk Type'], owner: ['Risk Owner', 'Owner', 'Accountable Owner'],
+  inherent_likelihood: ['Inherent Likelihood'], inherent_consequence: ['Inherent Impact', 'Inherent Consequence'],
+  residual_likelihood: ['Residual Likelihood', 'Current Likelihood'], residual_consequence: ['Residual Impact', 'Residual Consequence', 'Current Impact'],
+  next_review: ['Next Review Date', 'Review Due Date', 'Next Review'],
+};
+export const protechtIncidentFields = {
+  source_id: ['Incident ID', 'Event ID', 'ID'], reference: ['Incident Reference', 'Incident Number', 'Incident ID', 'Event ID'], title: ['Incident Title', 'Title', 'Event Title', 'Summary'],
+  description: ['Incident Description', 'Description'], kind: ['Event Type', 'Incident Type', 'Type'], severity: ['Severity', 'Incident Rating', 'Rating', 'Impact Rating'],
+  owner: ['Incident Owner', 'Owner', 'Assigned To'], occurred: ['Date Occurred', 'Occurred Date', 'Event Date'], aware: ['Date Identified', 'Date Discovered', 'Identified Date', 'Date Reported'],
+  risk: ['Linked Risk', 'Related Risk', 'Risk ID'], status: ['Incident Status', 'Status'], closed: ['Date Closed', 'Closed Date'], root_cause: ['Root Cause', 'Cause'],
+};
+const IMPORTS = {
+  camms: {kind: 'risks', fields: importFields, prefix: 'CAMMS', label: 'Camms'},
+  'protecht-risks': {kind: 'risks', fields: protechtRiskFields, prefix: 'PROTECHT', label: 'Protecht'},
+  'protecht-incidents': {kind: 'incidents', fields: protechtIncidentFields, prefix: 'PROTECHT', label: 'Protecht'},
+};
 function parseImportDate(v, label) {
   const s = String(v || '').trim(); if (!s) return null;
-  const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/); // Camms reports in NZ and AU print day first
+  const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/); // Camms and Protecht reports in NZ and AU print day first
   return safeDate(dmy ? `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}` : s, label, true);
 }
-async function importCamms(db, o) {
-  const actor = required(o, 'actor'), file = required(o, 'file');
-  const rows = parseCsv(fs.readFileSync(file, 'utf8')); if (!rows.length) throw Error('CSV has no records');
+// A date with an optional time, day first or ISO. The offset applies when the export prints local time.
+function parseImportTime(v, offset, label) {
+  const m = String(v || '').trim().match(/^(\S+)(?:[ T](\d{1,2}:\d{2})(?::\d{2})?)?$/);
+  if (!m) throw Error(`${label} must be a date, optionally with a time (DD/MM/YYYY HH:MM)`);
+  return timestamp(`${parseImportDate(m[1], label)} ${(m[2] || '00:00').padStart(5, '0')}${offset}`, label);
+}
+const SEVERITY = {minor: ['minor', 'low', 'insignificant', 'negligible', '1'], moderate: ['moderate', 'medium', '2'], major: ['major', 'high', 'significant', '3'], severe: ['severe', 'critical', 'extreme', 'very high', 'catastrophic', '4', '5']};
+const severityOf = (v, label) => { const s = String(v || '').trim().toLowerCase(); if (!s) return 'minor'; const hit = Object.keys(SEVERITY).find(k => SEVERITY[k].includes(s)); if (!hit) throw Error(`${label} "${v}" is not a known severity (${Object.values(SEVERITY).flat().join(', ')})`); return hit; };
+function readImport(o, fields) {
+  const rows = parseCsv(fs.readFileSync(required(o, 'file'), 'utf8')); if (!rows.length) throw Error('CSV has no records');
   let map = {};
   if (o.map) {
     map = JSON.parse(fs.readFileSync(required(o, 'map'), 'utf8'));
     if (!map || typeof map !== 'object' || Array.isArray(map)) throw Error('Column map must be an object');
-    for (const [k, v] of Object.entries(map)) if (!(k in importFields) || typeof v !== 'string' || !v.trim()) throw Error(`Unknown or invalid map field: ${k}`);
+    for (const [k, v] of Object.entries(map)) if (!(k in fields) || typeof v !== 'string' || !v.trim()) throw Error(`Unknown or invalid map field: ${k}`);
     for (const column of Object.values(map)) if (!Object.keys(rows[0]).some(k => k.toLowerCase() === column.toLowerCase())) throw Error(`Mapped column missing: ${column}`);
   }
+  return {rows, reader: row => k => String(map[k] ? pick(row, map[k]) : pick(row, ...fields[k])).trim()};
+}
+const sortedRow = row => Object.fromEntries(Object.entries(row).sort(([a], [b]) => a.localeCompare(b)));
+const hash = data => createHash('sha256').update(JSON.stringify(data)).digest('hex');
+async function importRisks(db, o, spec) {
+  const actor = required(o, 'actor');
+  const {rows, reader} = readImport(o, spec.fields);
   const seen = new Set(); const input = []; let residualDefaulted = 0;
   for (const [i, row] of rows.entries()) {
-    const read = k => String(map[k] ? pick(row, map[k]) : pick(row, ...importFields[k])).trim();
+    const read = reader(row);
     const source_id = read('source_id'), title = read('title');
     if (!source_id || !title) throw Error(`Row ${i + 2}: a risk ID and title are required; map your headings with --map`);
     if (seen.has(source_id.toLowerCase())) throw Error(`Row ${i + 2}: duplicate risk ID ${source_id}`); seen.add(source_id.toLowerCase());
@@ -170,11 +217,10 @@ async function importCamms(db, o) {
     let rl = read('residual_likelihood'), rc = read('residual_consequence');
     if (!rl || !rc) { residualDefaulted++; rl = il; rc = ic; } else { rl = await level(db, 'likelihood', rl, `Row ${i + 2} residual likelihood`); rc = await level(db, 'consequence', rc, `Row ${i + 2} residual consequence`); }
     const cat = read('category'); if (!cat) throw Error(`Row ${i + 2}: a risk category is required`);
-    const sorted = Object.fromEntries(Object.entries(row).sort(([a], [b]) => a.localeCompare(b)));
-    const data = {reference: read('reference') || `CAMMS-${source_id}`, title, description: read('description'), category: await category(db, cat), owner: read('owner'), status: 'draft',
+    const data = {reference: read('reference') || `${spec.prefix}-${source_id}`, title, description: read('description'), category: await category(db, cat), owner: read('owner'), status: 'draft',
       inherent_likelihood: il, inherent_consequence: ic, residual_likelihood: rl, residual_consequence: rc, next_review_on: parseImportDate(read('next_review'), `Row ${i + 2} next review`),
-      source_id, source_row: sorted};
-    data.source_hash = createHash('sha256').update(JSON.stringify(data)).digest('hex');
+      source_id, source_row: sortedRow(row)};
+    data.source_hash = hash(data);
     input.push(data);
   }
   return transaction(db, async () => {
@@ -182,9 +228,53 @@ async function importCamms(db, o) {
     for (const data of input) {
       const old = (await db.query('select source_hash from risks where source_id=$1', [data.source_id]))[0];
       if (old) { if (old.source_hash !== data.source_hash) throw Error(`Source risk ${data.source_id} changed since the last import. Reconcile it by hand before re-importing.`); unchanged++; continue; }
-      const r = await insert(db, 'risks', data); await audit(db, 'risk', r.reference, actor, 'import', 'Camms export imported as a draft; original fields kept'); added++;
+      const r = await insert(db, 'risks', data); await audit(db, 'risk', r.reference, actor, 'import', `${spec.label} export imported as a draft; original fields kept`); added++;
     }
     return {added, unchanged, residual_defaulted_to_inherent: residualDefaulted, dry_run: Boolean(o['dry-run'])};
+  }, Boolean(o['dry-run']));
+}
+// Incidents arrive with their dates, severity, status and linked risk. Nothing marks a notice as made
+// and nothing decides materiality or privacy: a person records those with update-incident.
+async function importIncidents(db, o, spec) {
+  const actor = required(o, 'actor');
+  const offset = o.offset === undefined ? 'Z' : String(o.offset).trim();
+  if (!/^(Z|[+-]\d{2}:\d{2})$/.test(offset)) throw Error('--offset must look like +10:00 or -05:00');
+  const {rows, reader} = readImport(o, spec.fields);
+  const seen = new Set(); const input = [];
+  for (const [i, row] of rows.entries()) {
+    const read = reader(row); const n = `Row ${i + 2}`;
+    const source_id = read('source_id'), title = read('title');
+    if (!source_id || !title) throw Error(`${n}: an incident ID and title are required; map your headings with --map`);
+    if (seen.has(source_id.toLowerCase())) throw Error(`${n}: duplicate incident ID ${source_id}`); seen.add(source_id.toLowerCase());
+    if (!read('aware') && !read('occurred')) throw Error(`${n}: a date identified (or occurred) is required`);
+    const aware_at = parseImportTime(read('aware') || read('occurred'), offset, `${n} date identified`);
+    const occurred_at = read('occurred') ? parseImportTime(read('occurred'), offset, `${n} date occurred`) : null;
+    if (Date.parse(aware_at) > Date.now() + 60e3) throw Error(`${n}: date identified is in the future`);
+    if (occurred_at && occurred_at > aware_at) throw Error(`${n}: occurred after it was identified`);
+    const closed = /^(closed|resolved|complete|completed|finalised|finalized)$/i.test(read('status'));
+    const closed_on = closed ? parseImportDate(read('closed'), `${n} date closed`) : null;
+    if (closed && !closed_on) throw Error(`${n}: a closed incident needs its date closed`);
+    const data = {reference: read('reference') || `${spec.prefix}-${source_id}`, title, description: read('description'), kind: /near/i.test(read('kind')) ? 'near-miss' : 'incident',
+      severity: severityOf(read('severity'), `${n} severity`), owner: read('owner'), aware_at, occurred_at, status: closed ? 'closed' : 'open', closed_on, root_cause: read('root_cause'),
+      source_id, source_row: sortedRow(row)};
+    data.source_hash = hash(data);
+    const ref = read('risk');
+    if (ref) {
+      const hit = await db.query('select id from risks where lower(reference)=lower($1) or lower(source_id)=lower($1)', [ref]);
+      if (hit.length !== 1) throw Error(`${n}: linked risk ${ref} is not in the register. Import the risk register first, or clear the column.`);
+      data.risk_id = hit[0].id;
+    }
+    input.push(data);
+  }
+  return transaction(db, async () => {
+    let added = 0, unchanged = 0;
+    for (const data of input) {
+      const old = (await db.query('select source_hash from incidents where source_id=$1', [data.source_id]))[0];
+      if (old) { if (old.source_hash !== data.source_hash) throw Error(`Source incident ${data.source_id} changed since the last import. Reconcile it by hand before re-importing.`); unchanged++; continue; }
+      const r = await insert(db, 'incidents', data); await audit(db, 'incident', r.reference, actor, 'import', `${spec.label} export imported; original fields kept`); added++;
+    }
+    return {added, unchanged, open: input.filter(x => x.status === 'open').length, closed: input.filter(x => x.status === 'closed').length,
+      linked_to_a_risk: input.filter(x => x.risk_id).length, times_read_as: offset === 'Z' ? 'UTC' : `UTC${offset}`, dry_run: Boolean(o['dry-run'])};
   }, Boolean(o['dry-run']));
 }
 
@@ -212,6 +302,40 @@ async function riskReport(db, o) {
     `## Heat map (residual)\n\n${human(await heatMap(db, false))}\n\n## Risks over appetite\n\n${human(register.filter(r => r.over_appetite))}\n\n## Rating movement since ${since}\n\n${human(moves)}\n\n` +
     `## Incidents in the period\n\n${human(inc)}\n\n## Rule findings\n\n${human(findings)}\n\n## Overdue treatment actions\n\n${human(overdue)}\n\n## Compliance attestations\n\n${human(obl)}\n\n## Decisions for the committee\n\n- Accept, treat or escalate each risk over appetite.\n- Note the notice clocks above and who owns each one.\n`;
   return {file: writeDraft('risk-report', text), open_risks: register.length, findings: findings.length};
+}
+
+// The quarterly board report: the same records as the committee report, laid out as one branded HTML page.
+async function boardReport(db, o) {
+  const since = safeDate(o.since ?? new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10), 'since', false);
+  if (since > today()) throw Error('--since cannot be in the future');
+  const org = (await db.query('select * from organisation'))[0] || {name: 'Your Business'};
+  const indicators = await db.query("select * from kri_status order by case status when 'red' then 1 when 'amber' then 2 when 'no reading' then 3 else 4 end,reference");
+  const history = {};
+  for (const x of await db.query(`select k.reference,x.measured_on,x.value::float8 as value from kri_readings x join key_risk_indicators k on k.id=x.kri_id
+      where k.status='active' and x.measured_on > current_date - 200 order by k.reference,x.measured_on`)) (history[x.reference] ||= []).push(x);
+  const c = (await db.query(`select count(*)::int total,count(*) filter (where effectiveness='effective')::int effective,
+      count(*) filter (where last_tested_on is not null and days_left<0)::int overdue,count(*) filter (where last_tested_on is null)::int never from control_queue`))[0];
+  const d = {org, since, until: today(), history, indicators,
+    register: await db.query('select reference,title,category,owner,inherent_score,residual_score,rating,appetite_score,over_appetite,open_actions from risk_register where status=$1 order by residual_score desc,reference', ['open']),
+    cells: await db.query("select residual_likelihood l,residual_consequence c,count(*)::int n,string_agg(reference,' ' order by reference) refs from risks where status='open' group by 1,2"),
+    bands: await db.query('select rating,min_score,max_score,rank from rating_bands order by rank'),
+    likelihood: await db.query('select level,label from likelihood_scale'), consequence: await db.query('select level,label from consequence_scale'),
+    moves: await run(db, ['movement', `--since=${since}`]),
+    incidents: await db.query(`select i.reference,i.title,i.severity,i.status,i.aware_at::date as aware_on,r.reference as risk,
+        case when i.regulator_notified_at is not null then 'Notified ' || to_char(i.regulator_notified_at,'YYYY-MM-DD')
+             when i.material_impact or i.outside_tolerance then 'Due ' || to_char(i.aware_at + case when i.outside_tolerance then interval '24 hours' else interval '72 hours' end,'YYYY-MM-DD HH24:MI') || ' UTC'
+             else 'Not required' end as apra
+      from incidents i left join risks r on r.id=i.risk_id where i.aware_at::date >= $1 order by i.aware_at desc`, [since]),
+    findings: await compliance(db),
+    overdue: await db.query('select record,reference,title,owner,due_on,days_left from action_queue where days_left<0 order by due_on'),
+    controls: {...c, weak: await db.query("select r.reference as risk,c.reference as control,c.title as control_title,c.owner,c.effectiveness,c.last_tested_on from controls c join risk_register r on r.id=c.risk_id where c.status='active' and c.effectiveness='ineffective' order by r.residual_score desc,c.reference")},
+    cps: await run(db, ['cps230-gaps']),
+    obligations: await db.query("select reference,title,source,owner,last_attested_on,last_outcome,days_left from obligation_queue where last_outcome in ('breach','partial') or days_left<0 or last_attested_on is null order by case last_outcome when 'breach' then 1 when 'partial' then 2 else 3 end,next_due_on,reference"),
+    audit: await db.query("select reference,audit,title,rating,owner,due_on,days_left from audit_queue order by days_left,reference"),
+  };
+  const file = writeDraft('board-report', boardReportHtml(d), 'html');
+  return {file, period: `${since} to ${today()}`, open_risks: d.register.length, over_appetite: d.register.filter(r => r.over_appetite).length,
+    red_indicators: indicators.filter(k => k.status === 'red').length, incidents: d.incidents.length, findings_needing_action: d.findings.filter(f => f.severity === 1).length};
 }
 
 async function draftNotification(db, o) {
@@ -248,14 +372,18 @@ const ALLOWED = {
   attest: ['obligation', 'outcome', 'evidence', 'date', 'note', 'actor'], 'add-operation': ['reference', 'name', 'owner', 'max-outage-hours', 'max-data-loss-hours', 'service-level', 'actor'],
   exercise: ['operation', 'kind', 'date', 'actor'], 'add-provider': ['reference', 'name', 'service', 'owner', 'material', 'operation', 'agreement-changed', 'actor'],
   'update-provider': ['provider', 'material', 'operation', 'agreement-changed', 'regulator-notified', 'reviewed', 'status', 'actor'], log: ['record', 'note', 'actor'],
-  import: ['file', 'map', 'dry-run', 'actor'], export: [],
+  'cps230-gaps': [], indicators: ['status'], 'indicator-breaches': ['since'],
+  'add-indicator': ['reference', 'name', 'owner', 'amber', 'red', 'risk', 'operation', 'unit', 'direction', 'every', 'description', 'actor'],
+  'record-reading': ['indicator', 'value', 'date', 'note', 'actor'], 'audit-findings': ['all'],
+  'add-finding': ['reference', 'audit', 'title', 'rating', 'owner', 'due', 'risk', 'control', 'raised', 'description', 'actor'], 'close-finding': ['finding', 'evidence', 'date', 'actor'],
+  'board-report': ['since'], import: ['file', 'map', 'offset', 'dry-run', 'actor'], export: [],
 };
 
 export async function run(db, argv) {
   const {o, p} = args(argv); const command = p[0] || 'help';
   if (!(command in commands)) throw Error(`Unknown command ${command}. Use help.`);
   for (const k of Object.keys(o)) if (k !== 'json' && !ALLOWED[command].includes(k)) throw Error(`Unknown option --${k} for ${command}`);
-  for (const k of ['json', 'dry-run', 'inherent']) if (Object.hasOwn(o, k) && o[k] !== true) throw Error(`--${k} is a bare flag`);
+  for (const k of ['json', 'dry-run', 'inherent', 'all']) if (Object.hasOwn(o, k) && o[k] !== true) throw Error(`--${k} is a bare flag`);
   if (p.length > (command === 'import' ? 2 : 1)) throw Error('Unexpected positional argument');
   const pastOrToday = (v, label) => { const d = safeDate(v ?? today(), label, false); if (d > today()) throw Error(`--${label} cannot be in the future`); return d; };
 
@@ -275,6 +403,8 @@ export async function run(db, argv) {
         actions: await db.query('select reference,title,owner,due_on,status,completed_on from actions where risk_id=$1 order by due_on', [r.id]),
         incidents: await db.query('select reference,title,severity,status,aware_at::date as aware_on from incidents where risk_id=$1 order by aware_at desc', [r.id]),
         reviews: await db.query('select reviewed_on,reviewer,residual_likelihood*residual_consequence as residual,note from risk_reviews where risk_id=$1 order by reviewed_on desc', [r.id]),
+        indicators: await db.query('select reference,name,status,last_value,unit,last_measured_on,trend from kri_status where risk=$1 order by reference', [r.reference]),
+        audit_findings: await db.query('select reference,audit,title,rating,owner,due_on,status from audit_findings where risk_id=$1 order by status desc,due_on', [r.id]),
         activity: await db.query("select created_at,actor,action,note from activity where record_kind='risk' and record_ref=$1 order by created_at desc,id desc", [r.reference])};
     }
     case 'heat-map': return heatMap(db, Boolean(o.inherent));
@@ -314,25 +444,72 @@ export async function run(db, argv) {
         union all select 'control test', risk || '/' || reference, case when last_tested_on is null then 'Never tested' else 'Test overdue by ' || (-days_left) || ' days' end, 2 from control_queue where days_left<0 or last_tested_on is null
         union all select 'review', reference, case when next_review_on is null then 'No review date' else 'Review overdue by ' || (-review_days_left) || ' days' end, 2 from risk_register where status='open' and (next_review_on is null or review_days_left<0)
         union all select 'owner', reference, 'No risk owner', 2 from risk_register where btrim(owner)=''
+        union all select 'indicator', reference, case when last_measured_on is null then 'No reading recorded' else 'Reading overdue by ' || (-days_left) || ' days, ' || owner end, 2 from kri_status where last_measured_on is null or days_left<0
+        union all select 'audit finding', reference, initcap(rating) || ' finding overdue by ' || (-days_left) || ' days, ' || owner, 2 from audit_queue where days_left<0 and rating<>'high'
         union all select 'quiet', reference, 'Rated ' || rating || ', no recorded activity for ' || coalesce((current_date-last_activity)::text,'ever') || ' days', 3 from risk_register where status='open' and rating in ('High','Extreme') and (last_activity is null or last_activity<current_date-30)
       ) x order by severity,what,reference`);
-    case 'owner-workload': return db.query(`select owner,count(*) filter (where kind='review')::int as reviews,count(*) filter (where kind='test')::int as tests,count(*) filter (where kind='action')::int as actions,count(*) filter (where kind='attest')::int as attestations,count(*)::int as total_overdue from (
+    case 'owner-workload': return db.query(`select owner,count(*) filter (where kind='review')::int as reviews,count(*) filter (where kind='test')::int as tests,count(*) filter (where kind='action')::int as actions,count(*) filter (where kind='attest')::int as attestations,count(*) filter (where kind='reading')::int as readings,count(*) filter (where kind='audit')::int as audit_findings,count(*)::int as total_overdue from (
         select owner,'review' kind from risk_register where status='open' and review_days_left<0
         union all select owner,'test' from control_queue where days_left<0 or last_tested_on is null
         union all select owner,'action' from action_queue where days_left<0
-        union all select owner,'attest' from obligation_queue where days_left<0) x group by owner order by total_overdue desc,owner`);
+        union all select owner,'attest' from obligation_queue where days_left<0
+        union all select owner,'reading' from kri_status where last_measured_on is null or days_left<0
+        union all select owner,'audit' from audit_queue where days_left<0) x group by owner order by total_overdue desc,owner`);
     case 'activity': return o.record ? db.query('select created_at,record_kind,record_ref,actor,action,note from activity where lower(record_ref)=lower($1) order by created_at desc,id desc', [String(o.record)]) : db.query('select created_at,record_kind,record_ref,actor,action,note from activity order by created_at desc,id desc limit 50');
     case 'weekly-review': {
       const out = {};
-      for (const c of ['compliance', 'incidents', ['actions-due', '--days=7'], ['reviews-due', '--days=7'], ['controls-due', '--days=7'], 'appetite']) { const a = [].concat(c); out[a[0]] = await run(db, a); }
+      for (const c of ['compliance', 'incidents', ['actions-due', '--days=7'], ['reviews-due', '--days=7'], ['controls-due', '--days=7'], 'appetite', 'indicator-breaches']) { const a = [].concat(c); out[a[0]] = await run(db, a); }
       return out;
     }
     case 'risk-report': return riskReport(db, o);
     case 'draft-notification': return draftNotification(db, o);
-    case 'import': if (p[1] !== 'camms') throw Error('Supported import: camms'); return importCamms(db, o);
+    case 'board-report': return boardReport(db, o);
+    case 'cps230-gaps': {
+      const org = (await db.query('select apra_regulated from organisation'))[0] || {apra_regulated: false};
+      const operations = await db.query(`select o.reference,o.name,o.owner,o.max_outage_hours::float8 as max_outage_hours,o.max_data_loss_hours::float8 as max_data_loss_hours,nullif(o.min_service_level,'') as min_service_level,
+          o.last_exercise_on,o.bcp_reviewed_on,
+          (select count(*) from service_providers p where p.critical_operation_id=o.id and p.material and p.status='active')::int as material_providers,
+          (select count(*) from incidents i where i.critical_operation_id=o.id and i.outside_tolerance and i.aware_at>now()-interval '365 days')::int as outside_tolerance_12m,
+          coalesce(nullif(concat_ws('; ',
+            case when o.max_outage_hours is null or o.max_data_loss_hours is null or btrim(o.min_service_level)='' then 'tolerance levels incomplete' end,
+            case when o.last_exercise_on is null then 'never exercised' when o.last_exercise_on<current_date-365 then 'exercise over a year old' end,
+            case when o.bcp_reviewed_on is null then 'no BCP review' when o.bcp_reviewed_on<current_date-365 then 'BCP review over a year old' end,
+            case when exists (select 1 from incidents i where i.critical_operation_id=o.id and i.outside_tolerance and i.regulator_notified_at is null) then 'disruption outside tolerance not yet notified to APRA' end),''),'none') as gaps
+        from critical_operations o order by o.reference`);
+      const providers = await db.query(`select p.reference,p.name,p.service,o.reference as operation,p.agreement_changed_on,p.regulator_notified_on,p.last_reviewed_on,
+          coalesce(nullif(concat_ws('; ',
+            case when o.id is null then 'not mapped to a critical operation' end,
+            case when o.id is not null and p.agreement_changed_on is not null and (p.regulator_notified_on is null or p.regulator_notified_on<p.agreement_changed_on) then 'APRA not yet notified of the agreement change' end,
+            case when p.last_reviewed_on is null then 'never reviewed' when p.last_reviewed_on<current_date-365 then 'review over a year old' end),''),'none') as gaps
+        from service_providers p left join critical_operations o on o.id=p.critical_operation_id where p.material and p.status='active' order by p.reference`);
+      const findings = await db.query("select severity,reference,rule,finding from compliance_findings where rule like 'CPS230-%' or rule='POLICY-PROVIDER-REVIEW' order by severity,rule,reference");
+      const gapOps = operations.filter(x => x.gaps !== 'none').length, gapProviders = providers.filter(x => x.gaps !== 'none').length;
+      return {summary: org.apra_regulated ? `${gapOps} of ${operations.length} critical operations and ${gapProviders} of ${providers.length} material providers have a gap; ${findings.filter(f => f.severity === 1).length} findings need action now`
+        : 'Not APRA-regulated (settings --apra-regulated=false): CPS 230 rules are off, the records below are for information', operations, providers, findings};
+    }
+    case 'indicators': {
+      const st = o.status === undefined ? null : oneOf(String(o.status).toLowerCase(), ['red', 'amber', 'green', 'no reading'], 'status');
+      return db.query(`select reference,name,owner,risk,unit,direction,amber,red,last_measured_on,last_value,previous_value,trend,status,next_due_on from kri_status ${st ? 'where status=$1' : ''}
+        order by case status when 'red' then 1 when 'amber' then 2 when 'no reading' then 3 else 4 end,reference`, st ? [st] : []);
+    }
+    case 'indicator-breaches': {
+      const since = o.since === undefined ? `${today().slice(0, 8)}01` : safeDate(o.since, 'since', false);
+      return db.query(`select * from (select k.reference,k.name,k.owner,r.reference as risk,x.measured_on,x.value::float8 as value,k.unit,k.amber_threshold::float8 as amber,k.red_threshold::float8 as red,
+          kri_rag(k.direction,k.amber_threshold,k.red_threshold,x.value) as status
+        from kri_readings x join key_risk_indicators k on k.id=x.kri_id left join risks r on r.id=k.risk_id where k.status='active' and x.measured_on>=$1) b
+        where status in ('red','amber') order by case status when 'red' then 1 else 2 end,reference,measured_on desc`, [since]);
+    }
+    case 'audit-findings': return o.all
+      ? db.query('select f.reference,f.audit,f.title,f.rating,f.owner,r.reference as risk,f.raised_on,f.due_on,f.status,f.closed_on,f.evidence from audit_findings f left join risks r on r.id=f.risk_id order by f.status desc,f.due_on,f.reference')
+      : db.query("select reference,audit,title,rating,owner,risk,control,raised_on,due_on,days_left from audit_queue order by days_left,case rating when 'high' then 1 when 'medium' then 2 else 3 end,reference");
+    case 'import': {
+      const spec = IMPORTS[p[1]]; if (!spec) throw Error(`Supported imports: ${Object.keys(IMPORTS).join(', ')}`);
+      if (o.offset !== undefined && spec.kind !== 'incidents') throw Error('--offset applies to incident imports');
+      return spec.kind === 'risks' ? importRisks(db, o, spec) : importIncidents(db, o, spec);
+    }
     case 'export': {
       const backup = {format: 'risk-compliance-for-claude-code/v1', exported_at: new Date().toISOString(), records: {}};
-      for (const t of ['organisation', 'rating_bands', 'likelihood_scale', 'consequence_scale', 'risk_categories', 'risks', 'risk_reviews', 'controls', 'control_tests', 'actions', 'incidents', 'obligations', 'attestations', 'critical_operations', 'service_providers', 'activity']) backup.records[t] = await db.query(`select * from ${t}`);
+      for (const t of ['organisation', 'rating_bands', 'likelihood_scale', 'consequence_scale', 'risk_categories', 'risks', 'risk_reviews', 'controls', 'control_tests', 'actions', 'incidents', 'obligations', 'attestations', 'critical_operations', 'service_providers', 'key_risk_indicators', 'kri_readings', 'audit_findings', 'activity']) backup.records[t] = await db.query(`select * from ${t}`);
       const dir = path.resolve(process.env.OUTPUT_DIR || REPO_ROOT, 'exports'); fs.mkdirSync(dir, {recursive: true});
       const file = path.join(dir, `risk-${today()}-${randomUUID().slice(0, 8)}.json`); fs.writeFileSync(file, JSON.stringify(backup, null, 2) + '\n', {flag: 'wx'});
       return {file, risks: backup.records.risks.length, incidents: backup.records.incidents.length};
@@ -489,6 +666,41 @@ export async function run(db, argv) {
         if (o.status !== undefined) d.status = oneOf(o.status, ['active', 'exited'], 'status');
         const u = await update(db, 'service_providers', p0.id, d); await audit(db, 'provider', p0.reference, actor, command, JSON.stringify(d)); return u;
       }
+      case 'add-indicator': {
+        const direction = oneOf(o.direction ?? 'higher', ['higher', 'lower'], 'direction');
+        const amber = numberValue(o.amber, 'amber'), red = numberValue(o.red, 'red');
+        if (direction === 'higher' ? Number(red) < Number(amber) : Number(red) > Number(amber)) throw Error(direction === 'higher' ? 'When higher is worse, --red must be at or above --amber' : 'When lower is worse, --red must be at or below --amber');
+        const d = {reference: required(o, 'reference'), name: required(o, 'name'), owner: required(o, 'owner'), description: o.description ? String(o.description) : '', unit: o.unit ? String(o.unit) : '',
+          direction, amber_threshold: amber, red_threshold: red, measure_every_days: intIn(o.every ?? '30', 1, 366, 'every')};
+        if (o.risk) d.risk_id = (await resolve(db, 'risks', required(o, 'risk'))).id;
+        if (o.operation) d.critical_operation_id = (await resolve(db, 'critical_operations', required(o, 'operation'))).id;
+        const k = await insert(db, 'key_risk_indicators', d); await audit(db, 'indicator', k.reference, actor, command, `${k.name}: amber ${amber}, red ${red}`); return k;
+      }
+      case 'record-reading': {
+        const k = await resolve(db, 'key_risk_indicators', required(o, 'indicator')); if (k.status !== 'active') throw Error('This indicator is retired');
+        const on = pastOrToday(o.date, 'date'), value = numberValue(o.value, 'value');
+        if ((await db.query('select 1 from kri_readings where kri_id=$1 and measured_on=$2', [k.id, on])).length) throw Error(`${k.reference} already has a reading on ${on}`);
+        const x = await insert(db, 'kri_readings', {kri_id: k.id, measured_on: on, value, recorded_by: actor, note: o.note ? String(o.note) : ''});
+        const status = (await db.query('select kri_rag($1,$2,$3,$4::numeric) as s', [k.direction, k.amber_threshold, k.red_threshold, value]))[0].s;
+        await audit(db, 'indicator', k.reference, actor, command, `${value} on ${on}: ${status}`); return {indicator: k.reference, measured_on: x.measured_on, value: Number(value), status};
+      }
+      case 'add-finding': {
+        const d = {reference: required(o, 'reference'), audit: required(o, 'audit'), title: required(o, 'title'), description: o.description ? String(o.description) : '',
+          rating: oneOf(required(o, 'rating'), ['low', 'medium', 'high'], 'rating'), owner: required(o, 'owner'), raised_on: pastOrToday(o.raised, 'raised'), due_on: safeDate(required(o, 'due'), 'due', false)};
+        if (d.due_on < d.raised_on) throw Error('--due cannot be before the date the finding was raised');
+        if (o.control && !o.risk) throw Error('--control needs --risk');
+        const r = o.risk ? await resolve(db, 'risks', required(o, 'risk')) : null;
+        if (r) { d.risk_id = r.id; if (o.control) d.control_id = (await resolve(db, 'controls', required(o, 'control'), r.id)).id; }
+        const f = await insert(db, 'audit_findings', d); await audit(db, 'audit', f.reference, actor, command, `${f.rating}: ${f.title}`);
+        if (r) await audit(db, 'risk', r.reference, actor, command, `${f.reference}: ${f.title}`);
+        return f;
+      }
+      case 'close-finding': {
+        const f = await resolve(db, 'audit_findings', required(o, 'finding')); if (f.status === 'closed') throw Error('Finding already closed');
+        const on = pastOrToday(o.date, 'date'); if (on < f.raised_on) throw Error('--date cannot be before the date the finding was raised');
+        const u = await update(db, 'audit_findings', f.id, {status: 'closed', closed_on: on, evidence: required(o, 'evidence')});
+        await audit(db, 'audit', f.reference, actor, command, o.evidence); return u;
+      }
       case 'log': {
         const ref = required(o, 'record');
         for (const kind of Object.keys(KINDS)) { const hit = await db.query(`select reference from ${kind} where lower(reference)=lower($1)`, [ref]); if (hit.length === 1) { await audit(db, KINDS[kind].audit, hit[0].reference, actor, 'note', required(o, 'note')); return {record: hit[0].reference, recorded: true}; } }
@@ -501,7 +713,7 @@ export async function run(db, argv) {
 
 // ------------------------------------------------------------------ output
 
-const HIDE = ['id', 'risk_id', 'incident_id', 'control_id', 'obligation_id', 'critical_operation_id', 'source_row', 'source_hash', 'created_at', 'updated_at'];
+const HIDE = ['id', 'risk_id', 'incident_id', 'control_id', 'obligation_id', 'critical_operation_id', 'kri_id', 'source_row', 'source_hash', 'created_at', 'updated_at'];
 export function human(result) {
   if (Array.isArray(result)) {
     if (!result.length) return '  (none)';
