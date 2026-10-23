@@ -24,6 +24,7 @@
   <a href="#the-commands">Commands</a> &bull;
   <a href="#ten-questions-camms-does-not-answer-for-you">Ten questions</a> &bull;
   <a href="#instead-of-camms">Instead of Camms</a> &bull;
+  <a href="#instead-of-protecht-erm">Instead of Protecht</a> &bull;
   <a href="#want-it-installed-and-run-for-you">Installed for you</a> &bull;
   <a href="#license">License</a>
 </p>
@@ -43,7 +44,7 @@ Risk and Compliance for Claude Code does the job you pay Camms for, as a databas
 
 Camms is now part of Riskonnect and does not publish a price. Public contract records show councils paying tens of thousands of pounds a year for Camms risk modules, and an NSW council paying AUD 363,440 over five years for a different Camms module ([research notes](docs/research.md)).
 
-It holds the risk register (inherent and residual ratings on your own five by five matrix, appetite per category), controls and their tests, treatment actions, incidents and near misses, the compliance obligations register with attestations, and the APRA CPS 230 records: critical operations, tolerance levels, continuity exercises and material service providers. It is built for councils, not-for-profits, advice and professional firms, and the super funds, insurers, credit unions and mutuals that have had to meet CPS 230 since 1 July 2025.
+It holds the risk register (inherent and residual ratings on your own five by five matrix, appetite per category), controls and their tests, treatment actions, incidents and near misses, key risk indicators with amber and red thresholds, internal audit findings, the compliance obligations register with attestations, and the APRA CPS 230 records: critical operations, tolerance levels, continuity exercises and material service providers. It is built for councils, not-for-profits, advice and professional firms, and the super funds, insurers, credit unions and mutuals that have had to meet CPS 230 since 1 July 2025.
 
 Want the same thing with a web front end, or built on a different stack? That is a customisation, and it is exactly what Enterprise DNA does: [book a call](https://enterprisedna.co/omni/book/?utm_source=github&utm_medium=readme&utm_campaign=camms).
 
@@ -54,7 +55,8 @@ Want the same thing with a web front end, or built on a different stack? That is
 | Monday | What needs a person this week? | `/weekly-review`, `/attention` |
 | Any incident | What notice clocks are running? | `/log-incident`, `/incidents`, `/draft-notification` |
 | Quarterly | Which risk reviews and control tests are due? | `/reviews-due`, `/controls-due`, `/review-risk`, `/test-control` |
-| Before the committee | What moved, what is over appetite, what is breached? | `/risk-report`, `/movement`, `/appetite`, `/heat-map` |
+| Monthly | Which indicators went amber or red? | `/indicators`, `/indicator-breaches`, `/record-reading` |
+| Before the committee | What moved, what is over appetite, what is breached? | `/risk-report`, `/board-report`, `/movement`, `/appetite`, `/heat-map` |
 | Yearly | Have we exercised every critical operation and attested every obligation? | `/resilience`, `/obligations-due`, `/attest`, `/exercise` |
 
 ## Why no front end
@@ -97,7 +99,7 @@ Each one runs against the demo data today.
 
 ## The commands
 
-43 slash commands in `.claude/commands`, each driving one CLI command (`npm run risk -- <command>`, `--json` for machines).
+52 slash commands in `.claude/commands`, each driving one CLI command (`npm run risk -- <command>`, `--json` for machines).
 
 | Command | What it does |
 |---|---|
@@ -114,17 +116,23 @@ Each one runs against the demo data today.
 | `/incidents` | Open incidents with the APRA 24 and 72 hour clocks and the privacy clocks |
 | `/obligations-due` | Obligations due for attestation, and recorded breaches |
 | `/resilience` | Critical operations, tolerance levels, exercises and material service providers |
+| `/cps230-gaps` | Every CPS 230 gap in one place: tolerance levels, exercises, BCP reviews, APRA notices, provider reviews |
+| `/indicators`, `/indicator-breaches` | Key risk indicators red, amber or green, and this month's breaches |
+| `/audit-findings` | Open internal audit findings, overdue first |
 | `/owner-workload` | Overdue items by owner |
 | `/risk-report` | The risk committee report, drafted to `drafts/` |
+| `/board-report` | The quarterly board risk report as a branded HTML page in `drafts/` |
 | `/draft-notification` | An internal draft notice to APRA, the NZ Privacy Commissioner or the OAIC, to `drafts/`, never sent |
 | `/add-risk`, `/update-risk`, `/review-risk`, `/add-category` | Keep the register |
 | `/add-control`, `/test-control` | Controls and their test evidence |
 | `/add-action`, `/complete-action` | Treatment and incident actions |
 | `/log-incident`, `/update-incident`, `/close-incident` | The incident register and its notices |
 | `/add-obligation`, `/attest` | The compliance obligations register |
+| `/add-indicator`, `/record-reading` | Key risk indicators and their readings |
+| `/add-finding`, `/close-finding` | Internal audit findings |
 | `/add-operation`, `/exercise`, `/add-provider`, `/update-provider` | CPS 230 records |
 | `/settings`, `/log`, `/activity` | Who this is for, which rules apply, and the history |
-| `/import`, `/export` | Bring Camms across; back everything up |
+| `/import`, `/export` | Bring Camms or Protecht across; back everything up |
 | `/customise`, `/new-view` | Make it yours: fields, matrix, rules, views |
 
 ## Paperwork, views and checks
@@ -157,9 +165,27 @@ npm run risk -- import camms --file=register.csv --actor="Your name"
 
 Risks arrive as drafts with the original row kept, repeats change nothing, and a row that changed since the last import stops the run. Map your own headings with `--map`. Controls, actions, incidents and attestations are separate reports. Full steps and what does not carry over: [docs/replace-camms.md](docs/replace-camms.md).
 
+## Instead of Protecht ERM
+
+The same system covers the Protecht ERM registers: risks, controls and testing, compliance obligations, incidents, key risk indicators, audit findings, CPS 230 operational resilience and the board report. [docs/protecht-demo.md](docs/protecht-demo.md) has the module by module coverage table and a fifteen minute demo on a fictional insurer:
+
+```bash
+npm run demo:insurer
+DATA_DIR=.data/insurer BRAND_FILE=demo/insurer/brand.json claude
+```
+
+Bring a Protecht risk register and incident register across from their CSV exports:
+
+```bash
+npm run risk -- import protecht-risks --file=risks.csv --actor="Your name" --dry-run
+npm run risk -- import protecht-incidents --file=incidents.csv --offset=+10:00 --actor="Your name" --dry-run
+```
+
+Full steps and what does not carry over: [docs/replace-protecht.md](docs/replace-protecht.md).
+
 ## Verification
 
-`npm test` uses a temporary database and runs all 42 CLI commands, every CPS 230, privacy and house rule turning on and off, the incident clocks, closing rules, import dry runs, repeats, rollback and mapping, the drafts, the export and the escaped HTML pages. Set `TEST_DATABASE_URL` to a new, empty Postgres to run the same suite there. GitHub checks run Linux, Windows and Postgres.
+`npm test` uses a temporary database and runs all 51 CLI commands, every CPS 230, privacy and house rule turning on and off, the incident clocks, closing rules, indicator thresholds, Camms and Protecht import dry runs, repeats, rollback and mapping, the drafts, the board report, the export and the escaped HTML pages. Then it loads the insurer demo and checks every answer in the demo script. Set `TEST_DATABASE_URL` to a new, empty Postgres to run the same suite there. GitHub checks run Linux, Windows and Postgres.
 
 ## Architecture
 
@@ -172,8 +198,9 @@ risk-compliance-for-claude-code/
   scripts/lib/db.mjs        one adapter: DATABASE_URL (pg) or embedded PGlite
   scripts/risk.mjs          the one CLI: npm run risk -- <command>
   supabase/migrations/      plain SQL schema, views and the rule checks
-  supabase/seed.sql         demo data
-  docs/                     the rules and sources, the Camms guide, the research
+  supabase/seed.sql         demo data (Tasman Community Mutual)
+  demo/insurer/             the Protecht demo insurer: seed and brand
+  docs/                     the rules and sources, the Camms and Protecht guides, the demo, the research
 ```
 
 ## Built for coding agents
