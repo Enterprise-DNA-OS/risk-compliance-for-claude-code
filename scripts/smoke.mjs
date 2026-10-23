@@ -247,6 +247,8 @@ try {
   const badRisk = path.join(dir, 'bad-risk.csv'); fs.writeFileSync(badRisk, 'Incident ID,Incident Title,Date Identified,Linked Risk\nINC-6001,Fine,01/10/2026,\nINC-6002,Orphan,01/10/2026,RSK-404\n');
   await fails('import', {...pi, file: badRisk}, /Row 3: linked risk RSK-404 is not in the register/, ['protecht-incidents']); await assert.rejects(() => resolve(db, 'incidents', 'INC-6001'), /No matching/);
   fs.writeFileSync(badRisk, 'Incident ID,Incident Title,Date Identified,Severity\nINC-6003,Odd,01/10/2026,Purple\n'); await fails('import', {...pi, file: badRisk}, /not a known severity/, ['protecht-incidents']);
+  fs.writeFileSync(badRisk, 'Incident ID,Incident Title,Date Identified\nINC-6005,ISO time,2026-10-01T09:15\n'); await call('import', {...pi, file: badRisk, offset: '+11:00'}, ['protecht-incidents']);
+  assert.equal(new Date((await resolve(db, 'incidents', 'INC-6005')).aware_at).toISOString(), '2026-09-30T22:15:00.000Z');
   fs.writeFileSync(badRisk, 'Incident ID,Incident Title,Date Identified,Status\nINC-6004,Closed without a date,01/10/2026,Closed\n'); await fails('import', {...pi, file: badRisk}, /needs its date closed/, ['protecht-incidents']);
 
   const exp = await call('export'); const backup = JSON.parse(fs.readFileSync(exp.file, 'utf8'));

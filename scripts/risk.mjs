@@ -184,7 +184,7 @@ function parseImportDate(v, label) {
 }
 // A date with an optional time, day first or ISO. The offset applies when the export prints local time.
 function parseImportTime(v, offset, label) {
-  const m = String(v || '').trim().match(/^(\S+)(?:[ T](\d{1,2}:\d{2})(?::\d{2})?)?$/);
+  const m = String(v || '').trim().match(/^([^\sT]+)(?:[ T](\d{1,2}:\d{2})(?::\d{2})?)?$/);
   if (!m) throw Error(`${label} must be a date, optionally with a time (DD/MM/YYYY HH:MM)`);
   return timestamp(`${parseImportDate(m[1], label)} ${(m[2] || '00:00').padStart(5, '0')}${offset}`, label);
 }
